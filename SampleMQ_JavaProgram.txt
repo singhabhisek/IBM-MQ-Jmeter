@@ -1,0 +1,190 @@
+package com.abhisek.testprojects;
+/*References Required - External JAR files : 
+ * com.ibm.mq.allclient-9.1.5.0.jar
+ * javax.jms-api-2.0.1.jar
+ */
+import java.io.IOException;
+import java.util.Hashtable;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+
+import com.ibm.mq.MQC;
+import com.ibm.mq.MQEnvironment;
+import com.ibm.mq.MQException;
+import com.ibm.mq.MQGetMessageOptions;
+import com.ibm.mq.MQMessage;
+import com.ibm.mq.MQPutMessageOptions;
+import com.ibm.mq.MQQueue;
+import com.ibm.mq.MQQueueManager;
+import com.ibm.mq.constants.CMQC;
+import com.ibm.mq.constants.MQConstants;
+
+/**
+ * Simple example program
+ */
+public class MQSample {
+
+  
+  // define the name of the QueueManager
+  private static final String qManager = "QM1";
+  // and define the name of the Queue
+  private static final String qName = "DEV.QUEUE.1";
+
+ 
+  public static void main(String args[]) {
+    try {
+      int depth =0;
+        
+      //MQEnvironment.userID= "AS";
+      //MQEnvironment.password = "12345";     
+      Hashtable<String, Object> properties = null;
+      properties = new Hashtable<String, Object>();
+      
+      //User Name of the ID that connects to MQ
+      properties.put(MQConstants.USER_ID_PROPERTY, "AS");
+      properties.put(MQConstants.PASSWORD_PROPERTY, "12345");
+      properties.put(MQConstants.USE_MQCSP_AUTHENTICATION_PROPERTY, false);
+      
+      //MQ Server Name/Port/Channels
+      properties.put(MQConstants.HOST_NAME_PROPERTY, "127.0.0.1");
+      properties.put(MQConstants.PORT_PROPERTY, 1871);
+      properties.put(MQConstants.CHANNEL_PROPERTY, "DEV.APP.SVRCONN");
+      
+      
+    	// Create a connection to the QueueManager
+      System.out.println("Connecting to queue manager: " + qManager);
+      //In case you want to connect to local queue manager in same machine, properties hashtable may not be required.
+      MQQueueManager qMgr = new MQQueueManager(qManager, properties);
+      
+
+      // Set up the options on the queue we wish to open
+      int openOptions = MQConstants.MQOO_INPUT_AS_Q_DEF | MQConstants.MQOO_OUTPUT | MQConstants.MQOO_INQUIRE;
+
+      // Now specify the queue that we wish to open and the open options
+      System.out.println("Accessing queue: " + qName);
+      MQQueue queue = qMgr.accessQueue(qName, openOptions);
+
+
+      depth = queue.getCurrentDepth();
+      System.out.println("Current Count on Program Start:" + depth);
+      
+      //TimeUnit.MINUTES.sleep(1);
+      
+      
+      
+
+      // Define a simple IBM MQ Message ...
+      MQMessage msg = new MQMessage();
+      // ... and write some text in UTF8 format
+      msg.writeUTF("Hello, World from Java Program!");
+
+      
+      // Specify the default put message options
+      MQPutMessageOptions pmo = new MQPutMessageOptions();
+      // msg.messageType = CMQC.MQMT_REQUEST;
+      
+      msg.correlationId = CMQC.MQCI_NONE;
+      java.util.Random R1 = new Random();
+      byte [] corId = new byte[24];
+      R1.nextBytes(corId);
+      msg.correlationId = corId ;
+      
+      
+      System.out.println("Sending a message..." );
+      queue.put(msg, pmo);
+
+      byte[] savedMsgId = msg.correlationId;
+      
+      // Put the message to the queue
+      
+//      String s = new String(savedMsgId);
+//      System.out.println("message ID..." +  "" + s);
+      
+      depth = queue.getCurrentDepth();
+      System.out.println("Current Count on Put:" + depth);
+      
+      // Now get the message back again based on correlation ID. First define an IBM MQ
+      // message to receive the data
+      
+      /*******Read one MQ Messages at once :: START********/
+      MQMessage rcvMessage = new MQMessage();
+
+      // Specify default get message options
+      MQGetMessageOptions gmo = new MQGetMessageOptions();
+      gmo.matchOptions = CMQC.MQMO_MATCH_CORREL_ID;
+      rcvMessage.correlationId = savedMsgId;
+      
+      // Get the message off the queue.
+      System.out.println("...and getting the message back again from Queue...");
+      queue.get(rcvMessage, gmo);
+
+      // And display the message text...
+      String msgText = rcvMessage.readStringOfByteLength(rcvMessage.getMessageLength());
+      System.out.println("Received message from GET is: " + msgText);
+
+      /*******Read one MQ Messages at once :: END********/
+      
+      //Check Depth once
+      depth = queue.getCurrentDepth();
+      System.out.println("Current Count on Program End:" + depth);
+
+      /*******in case to - Read all MQ Messages at once :: START********/
+      
+      System.out.println("#######READING ALL MESSAGES##########");
+      
+      byte[] b = null;
+		while (true) {
+			try {
+
+				rcvMessage.correlationId = MQC.MQCI_NONE;
+				rcvMessage.messageId = MQC.MQMI_NONE;
+				queue.get(rcvMessage, gmo);
+				b = new byte[rcvMessage.getMessageLength()];
+				rcvMessage.readFully(b);
+				System.out.println(new String(b));
+				rcvMessage.clearMessage();
+			} catch (IOException e) {
+				System.out.println("IOException: " + e.getMessage());
+				break;
+			} catch (MQException e) {
+				if (e.completionCode == 2 && e.reasonCode == MQException.MQRC_NO_MSG_AVAILABLE)
+					System.out.println("All messages read.");
+
+				else
+					System.out.println("MQException: Completion Code = " + e.completionCode + " : Reason Code = "
+							+ e.reasonCode);
+				break;
+			}
+		}
+		
+		/*******in case to - Read all MQ Messages at once :: END********/
+		
+      // Close the queue
+      System.out.println("Closing the queue");
+      queue.close();
+
+      // Disconnect from the QueueManager
+      System.out.println("Disconnecting from the Queue Manager");
+      qMgr.disconnect();
+      System.out.println("Done!");
+      
+    }
+    catch (MQException ex) {
+      System.out.println("An IBM MQ Error occurred : Completion Code " + ex.completionCode
+          + " Reason Code " + ex.reasonCode);
+      ex.printStackTrace();
+      for (Throwable t = ex.getCause(); t != null; t = t.getCause()) {
+        System.out.println("... Caused by ");
+        t.printStackTrace();
+      }
+
+    }
+    catch (java.io.IOException ex) {
+      System.out.println("An IOException occurred whilst writing to the message buffer: " + ex);
+    }
+    return;
+  }
+  
+  
+  
+}
